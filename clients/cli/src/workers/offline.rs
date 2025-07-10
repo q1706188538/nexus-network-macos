@@ -78,7 +78,7 @@ pub fn start_workers(
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
-                        let message = format!("Worker {} received shutdown signal", worker_id);
+                        let message = format!("工作线程 {} 接到关闭指令", worker_id);
                         let _ = prover_event_sender
                             .send(Event::prover(worker_id, message, EventType::Shutdown))
                             .await;
@@ -89,7 +89,7 @@ pub fn start_workers(
                         match authenticated_proving(&task).await {
                             Ok(proof) => {
                                 let message = format!(
-                                    "\x1b[32m\t[Task step 2 of 3] Proof completed successfully\x1b[0m (Task ID: {})",
+                                    "\x1b[32m\t[任务进度 2/3] 证明计算成功\x1b[0m (任务ID: {})",
                                     task.task_id
                                 );
                                 let _ = prover_event_sender
@@ -103,7 +103,7 @@ pub fn start_workers(
                             }
                             Err(e) => {
                                 let log_level = error_classifier.classify_worker_error(&e);
-                                let message = format!("Error: {}", e);
+                                let message = format!("计算错误: {}", e);
                                 let event = Event::prover_with_level(worker_id, message, EventType::Error, log_level);
                                 if event.should_display() {
                                     let _ = prover_event_sender.send(event).await;
@@ -145,7 +145,7 @@ pub async fn start_anonymous_workers(
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
-                        let message = format!("Worker {} received shutdown signal", worker_id);
+                        let message = format!("工作线程 {} 接到关闭指令", worker_id);
                         let _ = prover_event_sender
                             .send(Event::prover(worker_id, message, EventType::Shutdown))
                             .await;
@@ -156,7 +156,7 @@ pub async fn start_anonymous_workers(
                         // Perform work
                         match crate::prover::prove_anonymously().await {
                             Ok(_proof) => {
-                                let message = "Anonymous proof completed successfully".to_string();
+                                let message = "匿名证明已成功完成".to_string();
                                 let _ = prover_event_sender
                                     .send(Event::prover(worker_id, message, EventType::Success)).await;
 
@@ -165,7 +165,7 @@ pub async fn start_anonymous_workers(
                             }
                             Err(e) => {
                                 let log_level = error_classifier.classify_worker_error(&e);
-                                let message = format!("Anonymous Worker: Error - {}", e);
+                                let message = format!("匿名工作线程出错: {}", e);
                                 let event = Event::prover_with_level(worker_id, message, EventType::Error, log_level);
                                 if event.should_display() {
                                     let _ = prover_event_sender.send(event).await;

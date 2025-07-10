@@ -1,0 +1,26 @@
+name: Build macOS Binary
+
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build-macos:
+    name: Build for macOS
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build binary
+        run: cd clients/cli && cargo build --release
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-cli-macos
+          path: clients/cli/target/release/nexus-network 

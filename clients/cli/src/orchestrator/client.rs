@@ -13,9 +13,10 @@ use crate::system::{estimate_peak_gflops, get_memory_info};
 use crate::task::Task;
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use prost::Message;
-use reqwest::{Client, ClientBuilder, Response};
+use reqwest::{Client, ClientBuilder, Response, Proxy};
 use std::sync::OnceLock;
 use std::time::Duration;
+use rand::{distributions::Alphanumeric, Rng};
 
 // Privacy-preserving country detection for network optimization.
 // Only stores 2-letter country codes (e.g., "US", "CA", "GB") to help route
@@ -27,17 +28,39 @@ static COUNTRY_CODE: OnceLock<String> = OnceLock::new();
 pub struct OrchestratorClient {
     client: Client,
     environment: Environment,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
 }
 
 impl OrchestratorClient {
-    pub fn new(environment: Environment) -> Self {
-        Self {
-            client: ClientBuilder::new()
-                .timeout(Duration::from_secs(10))
-                .build()
-                .expect("Failed to create HTTP client"),
-            environment,
+    pub fn new(environment: Environment, proxy_url: Option<String>, proxy_user_pwd: Option<String>) -> Self {
+        let mut client_builder = ClientBuilder::new().timeout(Duration::from_secs(10));
+
+        if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
+            if !url.is_empty() {
+                let proxy_str = Self::generate_proxy_url(&url, &user_pwd);
+                let proxy = Proxy::all(proxy_str).expect("Failed to create proxy");
+                client_builder = client_builder.proxy(proxy);
+            }
         }
+
+        Self {
+            client: client_builder.build().expect("Failed to create HTTP client"),
+            environment,
+            proxy_url,
+            proxy_user_pwd,
+        }
+    }
+
+    fn generate_proxy_url(base_url: &str, user_pwd: &str) -> String {
+        let random_part: String = rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(8)
+            .map(char::from)
+            .collect();
+        let sessid = format!("hk{}", random_part);
+        let proxy_user = format!("user-roxadmin-region-hk-sessid-{}-sesstime-1-keep-true", sessid);
+        format!("http://{}:{}@{}", proxy_user, user_pwd, base_url)
     }
 
     fn build_url(&self, endpoint: &str) -> String {
@@ -302,6 +325,14 @@ impl Orchestrator for OrchestratorClient {
         self.post_request_no_response("v3/tasks/submit", request_bytes)
             .await
     }
+
+    fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator> {
+        Box::new(OrchestratorClient::new(
+            self.environment.clone(),
+            self.proxy_url.clone(),
+            self.proxy_user_pwd.clone(),
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -314,7 +345,7 @@ mod live_orchestrator_tests {
     #[ignore] // This test requires a live orchestrator instance.
     /// Should register a new user with the orchestrator.
     async fn test_register_user() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         // UUIDv4 for the user ID
         let user_id = uuid::Uuid::new_v4().to_string();
         let wallet_address = "0x1234567890abcdef1234567890cbaabc12345678"; // Example wallet address
@@ -328,7 +359,7 @@ mod live_orchestrator_tests {
     #[ignore] // This test requires a live orchestrator instance.
     /// Should register a new node to an existing user.
     async fn test_register_node() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         let user_id = "78db0be7-f603-4511-9576-c660f3c58395";
         match client.register_node(user_id).await {
             Ok(node_id) => println!("Node registered successfully: {}", node_id),
@@ -340,7 +371,7 @@ mod live_orchestrator_tests {
     #[ignore] // This test requires a live orchestrator instance.
     /// Should return a new proof task for the node.
     async fn test_get_proof_task() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         let node_id = "5880437"; // Example node ID
         let signing_key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
         let verifying_key = signing_key.verifying_key();
@@ -359,7 +390,7 @@ mod live_orchestrator_tests {
     #[ignore] // This test requires a live orchestrator instance.
     /// Should return the list of existing tasks for the node.
     async fn test_get_tasks() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         let node_id = "5880437"; // Example node ID
         match client.get_tasks(node_id).await {
             Ok(tasks) => {
@@ -378,7 +409,7 @@ mod live_orchestrator_tests {
     #[ignore] // This test requires a live orchestrator instance.
     /// Should return the user ID associated with a previously-registered wallet address.
     async fn test_get_user() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         let wallet_address = "0x52908400098527886E0F7030069857D2E4169EE8";
         match client.get_user(wallet_address).await {
             Ok(user_id) => {
@@ -392,7 +423,7 @@ mod live_orchestrator_tests {
     #[tokio::test]
     /// Should detect country using Cloudflare/fallback services.
     async fn test_country_detection() {
-        let client = super::OrchestratorClient::new(Environment::Beta);
+        let client = super::OrchestratorClient::new(Environment::Beta, None, None);
         let country = client.get_country().await;
 
         println!("Detected country: {}", country);

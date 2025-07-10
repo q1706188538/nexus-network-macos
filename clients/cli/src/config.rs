@@ -32,6 +32,14 @@ pub struct Config {
     /// The node's unique identifier, probably an integer. Empty when not yet registered.
     #[serde(default)]
     pub node_id: String,
+
+    /// The proxy url.
+    #[serde(default)]
+    pub proxy_url: String,
+
+    /// The proxy user password.
+    #[serde(default)]
+    pub proxy_user_pwd: String,
 }
 
 impl Config {
@@ -41,12 +49,16 @@ impl Config {
         wallet_address: String,
         node_id: String,
         environment: Environment,
+        proxy_url: String,
+        proxy_user_pwd: String,
     ) -> Self {
         Config {
             user_id,
             wallet_address,
             node_id,
             environment: environment.to_string(),
+            proxy_url,
+            proxy_user_pwd,
         }
     }
 
@@ -116,6 +128,8 @@ mod tests {
             user_id: "test_user_id".to_string(),
             wallet_address: "0x1234567890abcdef1234567890abcdef12345678".to_string(),
             node_id: "test_node_id".to_string(),
+            proxy_url: "".to_string(),
+            proxy_user_pwd: "".to_string(),
         }
     }
 
@@ -255,6 +269,8 @@ mod tests {
             user_id: "".to_string(),
             wallet_address: "".to_string(),
             node_id: "12345".to_string(),
+            proxy_url: "".to_string(),
+            proxy_user_pwd: "".to_string(),
         };
         config.save(&path).unwrap();
 

@@ -12,15 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
-# Cache dependencies
-COPY Cargo.toml Cargo.lock ./
-RUN cargo fetch --locked
-
 # Copy source code
 COPY . .
 
 # Build the actual app
-RUN cargo build --release --locked
+RUN cargo build --release
 
 ####################################################################################################
 ## Final image

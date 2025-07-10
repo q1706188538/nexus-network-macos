@@ -13,6 +13,8 @@ use crate::version_checker::start_version_checker_task;
 use crate::workers::{offline, online};
 use ed25519_dalek::SigningKey;
 use nexus_sdk::stwo::seq::Proof;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
@@ -28,6 +30,8 @@ pub async fn start_authenticated_workers(
     shutdown: broadcast::Receiver<()>,
     environment: Environment,
     client_id: String,
+    _proxy_url: Option<String>,
+    _proxy_user_pwd: Option<String>,
 ) -> (mpsc::Receiver<Event>, Vec<JoinHandle<()>>) {
     let mut join_handles = Vec::new();
     // Worker events
@@ -47,6 +51,9 @@ pub async fn start_authenticated_workers(
     // A bounded list of recently fetched task IDs (prevents refetching currently processing tasks)
     let enqueued_tasks = TaskCache::new(MAX_COMPLETED_TASKS);
 
+    // Shared counter for total completed tasks
+    let completed_count = Arc::new(AtomicU64::new(0));
+
     // Task fetching
     let (task_sender, task_receiver) = mpsc::channel::<Task>(TASK_QUEUE_SIZE);
     let verifying_key = signing_key.verifying_key();
@@ -54,6 +61,7 @@ pub async fn start_authenticated_workers(
         let orchestrator = orchestrator.clone();
         let event_sender = event_sender.clone();
         let shutdown = shutdown.resubscribe(); // Clone the receiver for task fetching
+        let completed_count_clone = completed_count.clone();
         tokio::spawn(async move {
             online::fetch_prover_tasks(
                 node_id,
@@ -63,6 +71,7 @@ pub async fn start_authenticated_workers(
                 event_sender,
                 shutdown,
                 enqueued_tasks,
+                completed_count_clone,
             )
             .await;
         })
@@ -99,6 +108,7 @@ pub async fn start_authenticated_workers(
         event_sender.clone(),
         shutdown.resubscribe(),
         successful_tasks.clone(),
+        completed_count,
     )
     .await;
     join_handles.push(submit_proofs_handle);

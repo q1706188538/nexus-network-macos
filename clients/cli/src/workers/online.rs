@@ -10,14 +10,17 @@ use crate::consts::prover::{
     TASK_QUEUE_SIZE,
 };
 use crate::error_classifier::{ErrorClassifier, LogLevel};
-use crate::events::Event;
-use crate::orchestrator::Orchestrator;
+use crate::events::{Event, EventType};
 use crate::orchestrator::error::OrchestratorError;
+use crate::orchestrator::Orchestrator;
 use crate::task::Task;
 use crate::task_cache::TaskCache;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use nexus_sdk::stwo::seq::Proof;
+use postcard;
 use sha3::{Digest, Keccak256};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
@@ -89,6 +92,7 @@ pub async fn fetch_prover_tasks(
     event_sender: mpsc::Sender<Event>,
     mut shutdown: broadcast::Receiver<()>,
     recent_tasks: TaskCache,
+    completed_count: Arc<AtomicU64>,
 ) {
     let mut state = TaskFetchState::new();
 
@@ -114,7 +118,10 @@ pub async fn fetch_prover_tasks(
                         &event_sender,
                         &recent_tasks,
                         &mut state,
-                    ).await {
+                        &completed_count,
+                    )
+                    .await
+                    {
                         if should_return {
                             return;
                         }
@@ -134,10 +141,12 @@ async fn attempt_task_fetch(
     event_sender: &mpsc::Sender<Event>,
     recent_tasks: &TaskCache,
     state: &mut TaskFetchState,
+    completed_count: &Arc<AtomicU64>,
 ) -> Result<(), bool> {
+    let count = completed_count.load(Ordering::SeqCst);
     let _ = event_sender
         .send(Event::task_fetcher_with_level(
-            "\x1b[32m\t[Task step 1 of 3] Fetching tasks...\x1b[0m\n\t\t\t\t\t\t\tNote: CLI tasks are harder to solve, so they receive 10 times more points than web provers".to_string(),
+            format!("\x1b[32m\t[任务进度 1/3] 正在获取新任务... (已完成: {} 个)\x1b[0m\n\t\t\t\t\t\t\t注意: CLI 任务难度更高，积分是网页版10倍", count),
             crate::events::EventType::Refresh,
             LogLevel::Debug,
         ))
@@ -158,12 +167,12 @@ async fn attempt_task_fetch(
             Ok(tasks) => {
                 // Record successful fetch attempt timing
                 state.record_fetch_attempt();
-                handle_fetch_success(tasks, sender, event_sender, recent_tasks, state).await
+                handle_fetch_success(tasks, sender, event_sender, recent_tasks, state, completed_count).await
             }
             Err(e) => {
                 // Record failed fetch attempt timing
                 state.record_fetch_attempt();
-                handle_fetch_error(e, event_sender, state).await;
+                handle_fetch_error(e, event_sender, state, completed_count).await;
                 Ok(())
             }
         },
@@ -172,7 +181,7 @@ async fn attempt_task_fetch(
             state.record_fetch_attempt();
             let _ = event_sender
                 .send(Event::task_fetcher_with_level(
-                    format!("\t\tFetch timeout after {}s", timeout_duration.as_secs()),
+                    format!("\t\t获取任务超时 ({}秒)", timeout_duration.as_secs()),
                     crate::events::EventType::Error,
                     LogLevel::Warn,
                 ))
@@ -195,13 +204,13 @@ async fn log_queue_status(
 
     let message = if state.should_fetch(tasks_in_queue) {
         format!(
-            "\t\tTasks Queue low: {} tasks to compute, ready to fetch",
+            "\t\t任务队列容量低: {} 个任务待计算，准备获取新任务",
             tasks_in_queue
         )
     } else {
         let time_since_secs = time_since_last.as_secs();
         format!(
-            "\t\tTasks to compute: {} tasks, waiting {}s more (retry every {}s)",
+            "\t\t任务队列中: {} 个任务待计算，还需等待 {}秒 (每 {}秒 重试)",
             tasks_in_queue,
             backoff_secs.saturating_sub(time_since_secs),
             backoff_secs
@@ -224,6 +233,7 @@ async fn handle_fetch_success(
     event_sender: &mpsc::Sender<Event>,
     recent_tasks: &TaskCache,
     state: &mut TaskFetchState,
+    completed_count: &Arc<AtomicU64>,
 ) -> Result<(), bool> {
     if tasks.is_empty() {
         handle_empty_task_response(sender, event_sender, state).await;
@@ -233,7 +243,15 @@ async fn handle_fetch_success(
     let (added_count, duplicate_count) =
         process_fetched_tasks(tasks, sender, event_sender, recent_tasks).await?;
 
-    log_fetch_results(added_count, duplicate_count, sender, event_sender, state).await;
+    log_fetch_results(
+        added_count,
+        duplicate_count,
+        sender,
+        event_sender,
+        state,
+        completed_count,
+    )
+    .await;
     Ok(())
 }
 
@@ -244,7 +262,7 @@ async fn handle_empty_task_response(
     state: &mut TaskFetchState,
 ) {
     // let current_queue_level = TASK_QUEUE_SIZE - sender.capacity();
-    let msg = "\t\tNo tasks available yet for this node".to_string();
+    let msg = "\t\t此节点暂无可用任务".to_string();
     let _ = event_sender
         .send(Event::task_fetcher_with_level(
             msg,
@@ -297,6 +315,7 @@ async fn log_fetch_results(
     sender: &mpsc::Sender<Task>,
     event_sender: &mpsc::Sender<Event>,
     state: &mut TaskFetchState,
+    _completed_count: &Arc<AtomicU64>,
 ) {
     if added_count > 0 {
         log_successful_fetch(added_count, sender, event_sender).await;
@@ -312,38 +331,16 @@ async fn log_successful_fetch(
     sender: &mpsc::Sender<Task>,
     event_sender: &mpsc::Sender<Event>,
 ) {
-    let current_queue_level = TASK_QUEUE_SIZE - sender.capacity();
-    let queue_percentage = (current_queue_level as f64 / TASK_QUEUE_SIZE as f64 * 100.0) as u32;
-
-    // Enhanced queue status logging
-    let msg = if added_count >= 5 {
-        format!(
-            "\t\tQueue status: +{} tasks → {} total ({}/{}={queued_percentage}% full)",
-            added_count,
-            current_queue_level,
-            current_queue_level,
-            TASK_QUEUE_SIZE,
-            queued_percentage = queue_percentage
-        )
-    } else {
-        format!(
-            "\t\tQueue status: +{} tasks → {} total ({}% full)",
-            added_count, current_queue_level, queue_percentage
-        )
-    };
-
-    // Log level based on queue fullness
-    let log_level = if queue_percentage >= 80 || added_count >= 5 {
-        LogLevel::Info // High queue level or significant additions are important
-    } else {
-        LogLevel::Debug // Minor additions are debug level
-    };
-
+    let tasks_in_queue = TASK_QUEUE_SIZE - sender.capacity();
+    let msg = format!(
+        "\t\t成功获取 {} 个新任务。队列中共有 {} 个任务。",
+        added_count, tasks_in_queue
+    );
     let _ = event_sender
         .send(Event::task_fetcher_with_level(
             msg,
             crate::events::EventType::Refresh,
-            log_level,
+            LogLevel::Info,
         ))
         .await;
 }
@@ -354,19 +351,18 @@ async fn handle_all_duplicates(
     event_sender: &mpsc::Sender<Event>,
     state: &mut TaskFetchState,
 ) {
-    // All duplicates - significant backoff increase
-    state.increase_backoff_for_error();
+    let msg = format!(
+        "\t\t忽略 {} 个重复任务，队列未改变。",
+        duplicate_count
+    );
     let _ = event_sender
         .send(Event::task_fetcher_with_level(
-            format!(
-                "🔄 All {} tasks were duplicates - backing off for {}s",
-                duplicate_count,
-                state.backoff_duration.as_secs()
-            ),
+            msg,
             crate::events::EventType::Refresh,
-            LogLevel::Warn,
+            LogLevel::Debug,
         ))
         .await;
+    state.increase_backoff_for_error();
 }
 
 /// Handle fetch errors with appropriate backoff
@@ -374,34 +370,27 @@ async fn handle_fetch_error(
     error: OrchestratorError,
     event_sender: &mpsc::Sender<Event>,
     state: &mut TaskFetchState,
+    _completed_count: &Arc<AtomicU64>,
 ) {
-    if matches!(error, OrchestratorError::Http { status: 429, .. }) {
-        state.increase_backoff_for_rate_limit();
-        let _ = event_sender
-            .send(Event::task_fetcher_with_level(
-                format!(
-                    "⏳ Rate limited - retrying in {}s",
-                    state.backoff_duration.as_secs()
-                ),
-                crate::events::EventType::Error,
-                LogLevel::Warn,
-            ))
-            .await;
-    } else {
-        state.increase_backoff_for_error();
-        let log_level = state.error_classifier.classify_fetch_error(&error);
-        let event = Event::task_fetcher_with_level(
-            format!(
-                "Failed to fetch tasks: {}, retrying in {} seconds",
-                error,
-                state.backoff_duration.as_secs()
-            ),
+    let log_level = state.error_classifier.classify_fetch_error(&error);
+    let msg = format!("\t\t获取任务失败: {}", error);
+    let _ = event_sender
+        .send(Event::task_fetcher_with_level(
+            msg,
             crate::events::EventType::Error,
             log_level,
-        );
-        if event.should_display() {
-            let _ = event_sender.send(event).await;
+        ))
+        .await;
+
+    // Apply backoff based on error type
+    if let OrchestratorError::Http { status, .. } = error {
+        if status == 429 {
+            state.increase_backoff_for_rate_limit();
+        } else if status >= 500 && status < 600 || status >= 400 && status < 500 {
+            state.increase_backoff_for_error();
         }
+    } else {
+        state.increase_backoff_for_error();
     }
 }
 
@@ -534,60 +523,55 @@ pub async fn submit_proofs(
     signing_key: SigningKey,
     orchestrator: Box<dyn Orchestrator>,
     num_workers: usize,
-    mut results: mpsc::Receiver<(Task, Proof)>,
+    mut _results: mpsc::Receiver<(Task, Proof)>,
     event_sender: mpsc::Sender<Event>,
     mut shutdown: broadcast::Receiver<()>,
     successful_tasks: TaskCache,
+    completed_count: Arc<AtomicU64>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let mut completed_count = 0;
+        let mut session_completed_count = 0;
         let mut last_stats_time = std::time::Instant::now();
-        let stats_interval = Duration::from_secs(60);
 
         loop {
             tokio::select! {
-                maybe_item = results.recv() => {
-                    match maybe_item {
-                        Some((task, proof)) => {
-                            if let Some(success) = process_proof_submission(
-                                task,
-                                proof,
-                                &*orchestrator,
-                                &signing_key,
-                                num_workers,
-                                &event_sender,
-                                &successful_tasks,
-                            ).await {
-                                if success {
-                                    completed_count += 1;
-                                }
-                            }
+                _ = shutdown.recv() => {
+                    println!("\n收到关闭信号，正在退出证明提交循环。");
+                    break;
+                }
+                result = _results.recv() => {
+                    if let Some((task, proof)) = result {
+                        let orchestrator_clone = orchestrator.recreate_with_new_proxy();
+                        if process_proof_submission(
+                            task,
+                            proof,
+                            &*orchestrator_clone,
+                            &signing_key,
+                            num_workers,
+                            &event_sender,
+                            &successful_tasks
+                        ).await.is_none() {
+                            // On success, increment counters
+                            completed_count.fetch_add(1, Ordering::SeqCst);
+                            session_completed_count += 1;
+                        };
 
-                            // Check if it's time to report stats (avoid timer starvation)
-                            if last_stats_time.elapsed() >= stats_interval {
-                                report_performance_stats(&event_sender, completed_count, last_stats_time).await;
-                                completed_count = 0;
-                                last_stats_time = std::time::Instant::now();
-                            }
+                        if session_completed_count >= 10 {
+                            report_performance_stats(&event_sender, session_completed_count, last_stats_time).await;
+                            session_completed_count = 0;
+                            last_stats_time = std::time::Instant::now();
                         }
-                        None => break,
+                    } else {
+                        println!("结果通道已关闭，正在退出证明提交循环。");
+                        break;
                     }
                 }
-
-                _ = tokio::time::sleep(stats_interval) => {
-                    // Fallback timer in case there's no activity
-                    report_performance_stats(&event_sender, completed_count, last_stats_time).await;
-                    completed_count = 0;
-                    last_stats_time = std::time::Instant::now();
-                }
-
-                _ = shutdown.recv() => break,
             }
         }
     })
 }
 
-/// Report performance statistics
+/// Reports the performance statistics of the prover.
 async fn report_performance_stats(
     event_sender: &mpsc::Sender<Event>,
     completed_count: u64,
@@ -601,7 +585,7 @@ async fn report_performance_stats(
     };
 
     let msg = format!(
-        "\t\tPerformance Status: {} tasks completed in the past {:.1}s ({:.1} tasks/min)",
+        "\t\t性能状态: {} 个任务在 {:.1} 秒内完成 ({:.1} 个任务/分钟)",
         completed_count,
         elapsed.as_secs_f64(),
         tasks_per_minute
@@ -638,43 +622,68 @@ async fn process_proof_submission(
         return None; // Skip this task
     }
 
-    // Serialize proof
     let proof_bytes = postcard::to_allocvec(&proof).expect("Failed to serialize proof");
-    let proof_hash = format!("{:x}", Keccak256::digest(&proof_bytes));
+    let mut hasher = Keccak256::new();
+    hasher.update(&proof_bytes);
+    let proof_hash = format!("0x{}", hex::encode(hasher.finalize()));
+    let _ = event_sender
+        .send(Event::proof_submitter(
+            format!(
+                "\t[任务进度 3/3] 正在提交任务 {} 的证明",
+                task.task_id
+            ),
+            crate::events::EventType::Refresh,
+        ))
+        .await;
 
-    // Submit to orchestrator
-    match orchestrator
-        .submit_proof(
-            &task.task_id,
-            &proof_hash,
-            proof_bytes,
-            signing_key.clone(),
-            num_workers,
-        )
-        .await
-    {
-        Ok(_) => {
-            handle_submission_success(&task, event_sender, successful_tasks).await;
-            Some(true)
-        }
-        Err(e) => {
-            handle_submission_error(&task, e, event_sender).await;
-            Some(false)
+    let mut retries = 0;
+    loop {
+        let current_orchestrator = orchestrator.recreate_with_new_proxy();
+        match current_orchestrator
+            .submit_proof(
+                &task.task_id,
+                &proof_hash,
+                proof_bytes.clone(),
+                signing_key.clone(),
+                num_workers,
+            )
+            .await
+        {
+            Ok(()) => {
+                handle_submission_success(&task, event_sender, successful_tasks).await;
+                return None; // Success, don't break the loop
+            }
+            Err(e) => {
+                if retries < 1 {
+                    retries += 1;
+                    let _ = event_sender
+                        .send(Event::prover_with_level(
+                            0, // worker_id is not available here, using 0 as placeholder
+                            format!(
+                                "任务 {} 证明提交失败，正在更换IP重试...",
+                                task.task_id
+                            ),
+                            crate::events::EventType::Error,
+                            LogLevel::Warn,
+                        ))
+                        .await;
+                    continue; // continue to the next iteration to retry
+                } else {
+                    handle_submission_error(&task, e, event_sender).await;
+                    return Some(true); // Stop after retries exhausted
+                }
+            }
         }
     }
 }
 
-/// Handle successful proof submission
+/// Handle a successful proof submission.
 async fn handle_submission_success(
     task: &Task,
     event_sender: &mpsc::Sender<Event>,
     successful_tasks: &TaskCache,
 ) {
-    successful_tasks.insert(task.task_id.clone()).await;
-    let msg = format!(
-        "\x1b[32m\t[Task step 3 of 3] Proof submitted\x1b[0m (Task ID: {})\n\t\t\t\t\t\t\tPoints for this node will be updated in https://app.nexus.xyz/rewards within 10 minutes\n",
-        task.task_id
-    );
+    let msg = format!("\t\t成功提交任务 {} 的证明！", task.task_id);
     let _ = event_sender
         .send(Event::proof_submitter_with_level(
             msg,
@@ -682,27 +691,22 @@ async fn handle_submission_success(
             LogLevel::Info,
         ))
         .await;
+    successful_tasks.insert(task.task_id.clone()).await;
 }
 
-/// Handle proof submission errors
+/// Handle an error during proof submission.
 async fn handle_submission_error(
     task: &Task,
     error: OrchestratorError,
     event_sender: &mpsc::Sender<Event>,
 ) {
-    let msg = match error {
-        OrchestratorError::Http { status, .. } => {
-            format!(
-                "Failed to submit proof for task {}. Status: {}",
-                task.task_id, status
-            )
-        }
-        e => {
-            format!("Failed to submit proof for task {}: {}", task.task_id, e)
-        }
-    };
-
+    let msg = format!("\t\t任务 {} 证明提交失败: {}", task.task_id, error);
     let _ = event_sender
-        .send(Event::proof_submitter(msg, crate::events::EventType::Error))
+        .send(Event::prover_with_level(
+            0, // worker_id is not available here, using 0 as placeholder
+            msg,
+            crate::events::EventType::Error,
+            LogLevel::Error,
+        ))
         .await;
 }

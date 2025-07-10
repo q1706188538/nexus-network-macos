@@ -52,8 +52,8 @@ enum Command {
     /// Start the prover
     Start {
         /// Node ID
-        #[arg(long, value_name = "NODE_ID")]
-        node_id: Option<u64>,
+        #[arg(long, value_name = "NODE_ID", num_args = 1..)]
+        node_ids: Vec<u64>,
 
         /// Run without the terminal UI
         #[arg(long = "headless", action = ArgAction::SetTrue)]
@@ -62,6 +62,14 @@ enum Command {
         /// Maximum number of threads to use for proving.
         #[arg(long = "max-threads", value_name = "MAX_THREADS")]
         max_threads: Option<u32>,
+
+        /// proxy url
+        #[arg(long, value_name = "PROXY_URL")]
+        proxy_url: Option<String>,
+
+        /// proxy user password
+        #[arg(long, value_name = "PROXY_USER_PWD")]
+        proxy_user_pwd: Option<String>,
     },
     /// Register a new user
     RegisterUser {
@@ -91,21 +99,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     match args.command {
         Command::Start {
-            node_id,
+            node_ids,
             headless,
             max_threads,
-        } => start(node_id, environment, config_path, headless, max_threads).await,
+            proxy_url,
+            proxy_user_pwd,
+        } => start(node_ids, environment, config_path, headless, max_threads, proxy_url, proxy_user_pwd).await,
         Command::Logout => {
-            println!("Logging out and clearing node configuration file...");
+            println!("正在登出并清除节点配置...");
             Config::clear_node_config(&config_path).map_err(Into::into)
         }
         Command::RegisterUser { wallet_address } => {
-            println!("Registering user with wallet address: {}", wallet_address);
-            let orchestrator = Box::new(OrchestratorClient::new(environment));
+            println!("正在使用钱包地址注册用户: {}", wallet_address);
+            let orchestrator = Box::new(OrchestratorClient::new(environment, None, None));
             register_user(&wallet_address, &config_path, orchestrator).await
         }
         Command::RegisterNode { node_id } => {
-            let orchestrator = Box::new(OrchestratorClient::new(environment));
+            let orchestrator = Box::new(OrchestratorClient::new(environment, None, None));
             register_node(node_id, &config_path, orchestrator).await
         }
     }
@@ -120,38 +130,89 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// * `headless` - If true, runs without the terminal UI.
 /// * `max_threads` - Optional maximum number of threads to use for proving.
 async fn start(
-    node_id: Option<u64>,
+    node_ids: Vec<u64>,
     env: Environment,
     config_path: std::path::PathBuf,
     headless: bool,
     max_threads: Option<u32>,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut node_id = node_id;
-    // If no node ID is provided, try to load it from the config file.
-    if node_id.is_none() && config_path.exists() {
+    if node_ids.is_empty() {
+        // If no node IDs are provided, try to load from config or fail.
         let config = Config::load_from_file(&config_path)?;
-        node_id = Some(config.node_id.parse::<u64>().map_err(|e| {
+        let node_id = config.node_id.parse::<u64>().map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "Failed to parse node_id {:?} from the config file as a u64: {}",
+                    "无法将配置文件中的 node_id {:?} 解析为 u64: {}",
                     config.node_id, e
                 ),
             )
-        })?);
-        println!("Read Node ID: {} from config file\n", node_id.unwrap());
+        })?;
+        println!("从配置文件读取到节点ID: {}\n", node_id);
+        run_for_node_id(
+            node_id,
+            env,
+            config_path.clone(),
+            headless,
+            max_threads,
+            proxy_url,
+            proxy_user_pwd,
+        )
+        .await?;
+    } else {
+        let mut join_handles = Vec::new();
+        for node_id in node_ids {
+            let env = env.clone();
+            let config_path = config_path.clone();
+            let proxy_url = proxy_url.clone();
+            let proxy_user_pwd = proxy_user_pwd.clone();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_for_node_id(
+                    node_id,
+                    env,
+                    config_path,
+                    headless,
+                    max_threads,
+                    proxy_url,
+                    proxy_user_pwd,
+                )
+                .await
+                {
+                    eprintln!("为节点 {} 运行时出错: {}", node_id, e);
+                }
+            });
+            join_handles.push(handle);
+        }
+
+        for handle in join_handles {
+            handle.await?;
+        }
     }
 
+    Ok(())
+}
+
+async fn run_for_node_id(
+    node_id: u64,
+    env: Environment,
+    config_path: std::path::PathBuf,
+    headless: bool,
+    max_threads: Option<u32>,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
+) -> Result<(), Box<dyn Error>> {
     // Create a signing key for the prover.
     let mut csprng = rand_core::OsRng;
     let signing_key: SigningKey = SigningKey::generate(&mut csprng);
-    let orchestrator_client = OrchestratorClient::new(env);
+    let orchestrator_client = OrchestratorClient::new(env, proxy_url.clone(), proxy_user_pwd.clone());
     // Clamp the number of workers to [1,8]. Keep this low for now to avoid rate limiting.
     let num_workers: usize = max_threads.unwrap_or(1).clamp(1, 8) as usize;
     let (shutdown_sender, _) = broadcast::channel(1); // Only one shutdown signal needed
 
     // Load config to get client_id for analytics
-    let config_path = get_config_path()?;
     let client_id = if config_path.exists() {
         match Config::load_from_file(&config_path) {
             Ok(config) => {
@@ -172,23 +233,18 @@ async fn start(
         "anonymous".to_string() // No config file = anonymous user
     };
 
-    let (mut event_receiver, mut join_handles) = match node_id {
-        Some(node_id) => {
-            start_authenticated_workers(
-                node_id,
-                signing_key.clone(),
-                orchestrator_client.clone(),
-                num_workers,
-                shutdown_sender.subscribe(),
-                env,
-                client_id,
-            )
-            .await
-        }
-        None => {
-            start_anonymous_workers(num_workers, shutdown_sender.subscribe(), env, client_id).await
-        }
-    };
+    let (mut event_receiver, mut join_handles) = start_authenticated_workers(
+        node_id,
+        signing_key.clone(),
+        orchestrator_client.clone(),
+        num_workers,
+        shutdown_sender.subscribe(),
+        env,
+        client_id,
+        proxy_url,
+        proxy_user_pwd,
+    )
+    .await;
 
     if !headless {
         // Terminal setup
@@ -202,7 +258,7 @@ async fn start(
 
         // Create the application and run it.
         let app = ui::App::new(
-            node_id,
+            Some(node_id),
             *orchestrator_client.environment(),
             event_receiver,
             shutdown_sender,
@@ -242,10 +298,10 @@ async fn start(
             }
         }
     }
-    println!("\nExiting...");
+    println!("\n正在退出...");
     for handle in join_handles.drain(..) {
         let _ = handle.await;
     }
-    println!("Nexus CLI application exited successfully.");
+    println!("Nexus CLI 应用已成功退出。");
     Ok(())
 }

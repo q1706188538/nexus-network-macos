@@ -47,4 +47,7 @@ pub trait Orchestrator: Send + Sync {
         signing_key: SigningKey,
         num_provers: usize,
     ) -> Result<(), OrchestratorError>;
+
+    /// Recreates the orchestrator client with a new proxy.
+    fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator>;
 }

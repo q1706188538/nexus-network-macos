@@ -59,6 +59,8 @@ pub async fn register_user(
             wallet_address.to_string(),
             String::new(), // node_id is empty for now
             *orchestrator.environment(),
+            String::new(),
+            String::new(),
         );
         // Save the configuration file with the user ID and wallet address.
         config
@@ -90,6 +92,8 @@ pub async fn register_user(
         wallet_address.to_string(),
         String::new(), // node_id is empty for now
         *orchestrator.environment(),
+        String::new(),
+        String::new(),
     );
     config
         .save(config_path)
