@@ -18,6 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use rand::{distributions::Alphanumeric, Rng};
+use tracing::{debug, error, info, warn};
 
 // Global counters for task submissions
 pub static SUCCESSFUL_SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);

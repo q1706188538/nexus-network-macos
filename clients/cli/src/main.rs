@@ -142,6 +142,9 @@ async fn start(
     // Spawn the stats server in the background
     tokio::spawn(stats_server::run_stats_server());
 
+    // 创建一个共享的OrchestratorClient实例
+    let orchestrator_client = OrchestratorClient::new(env, proxy_url.clone(), proxy_user_pwd.clone());
+
     if node_ids.is_empty() {
         // If no node IDs are provided, try to load from config or fail.
         let config = Config::load_from_file(&config_path)?;
@@ -157,7 +160,7 @@ async fn start(
         println!("从配置文件读取到节点ID: {}\n", node_id);
         run_for_node_id(
             node_id,
-            env,
+            orchestrator_client,
             config_path.clone(),
             headless,
             max_threads,
@@ -168,20 +171,20 @@ async fn start(
     } else {
         let mut join_handles = Vec::new();
         for node_id in node_ids {
-            let env = env.clone();
-            let config_path = config_path.clone();
-            let proxy_url = proxy_url.clone();
-            let proxy_user_pwd = proxy_user_pwd.clone();
+            let client_clone = orchestrator_client.clone();
+            let config_path_clone = config_path.clone();
+            let proxy_url_clone = proxy_url.clone();
+            let proxy_user_pwd_clone = proxy_user_pwd.clone();
 
             let handle = tokio::spawn(async move {
                 if let Err(e) = run_for_node_id(
                     node_id,
-                    env,
-                    config_path,
+                    client_clone,
+                    config_path_clone,
                     headless,
                     max_threads,
-                    proxy_url,
-                    proxy_user_pwd,
+                    proxy_url_clone,
+                    proxy_user_pwd_clone,
                 )
                 .await
                 {
@@ -201,7 +204,7 @@ async fn start(
 
 async fn run_for_node_id(
     node_id: u64,
-    env: Environment,
+    orchestrator_client: OrchestratorClient,
     config_path: std::path::PathBuf,
     headless: bool,
     max_threads: Option<u32>,
@@ -211,7 +214,7 @@ async fn run_for_node_id(
     // Create a signing key for the prover.
     let mut csprng = rand_core::OsRng;
     let signing_key: SigningKey = SigningKey::generate(&mut csprng);
-    let orchestrator_client = OrchestratorClient::new(env, proxy_url.clone(), proxy_user_pwd.clone());
+    let env = orchestrator_client.environment().clone();
     // Clamp the number of workers to [1,8]. Keep this low for now to avoid rate limiting.
     let num_workers: usize = max_threads.unwrap_or(1).clamp(1, 8) as usize;
     let (shutdown_sender, _) = broadcast::channel(1); // Only one shutdown signal needed
