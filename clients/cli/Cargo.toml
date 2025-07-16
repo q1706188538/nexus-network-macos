@@ -1,5 +1,5 @@
 [package]
-name = "nexus-network"
+name = "nexus-network-mac"
 version = "0.9.5"
 edition = "2024"
 rust-version = "1.85"
@@ -9,7 +9,7 @@ build = "build.rs"
 build_proto = []
 
 [[bin]]
-name = "nexus-cli"
+name = "nexus-network-mac"
 path = "src/main.rs"
 
 [profile.dev]
