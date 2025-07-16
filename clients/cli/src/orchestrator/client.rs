@@ -53,7 +53,7 @@ impl OrchestratorClient {
                 
                 // 为 HTTP 和 HTTPS 创建代理
                 let http_proxy = Proxy::http(proxy_str.clone()).expect("Failed to create HTTP proxy");
-                let https_proxy = Proxy::https_proxy(proxy_str).expect("Failed to create HTTPS proxy");
+                let https_proxy = Proxy::https(proxy_str).expect("Failed to create HTTPS proxy");
                 
                 client_builder = client_builder.proxy(http_proxy).proxy(https_proxy);
             }
