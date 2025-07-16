@@ -43,13 +43,19 @@ pub struct OrchestratorClient {
 
 impl OrchestratorClient {
     pub fn new(environment: Environment, proxy_url: Option<String>, proxy_user_pwd: Option<String>) -> Self {
-        let mut client_builder = ClientBuilder::new().timeout(Duration::from_secs(10));
+        let mut client_builder = ClientBuilder::new()
+            .timeout(Duration::from_secs(30)) // 增加超时以适应潜在的慢代理
+            .no_proxy(); // 禁用系统代理，确保我们的设置是唯一的
 
         if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
             if !url.is_empty() {
                 let proxy_str = Self::generate_proxy_url(&url, &user_pwd);
-                let proxy = Proxy::all(proxy_str).expect("Failed to create proxy");
-                client_builder = client_builder.proxy(proxy);
+                
+                // 为 HTTP 和 HTTPS 创建代理
+                let http_proxy = Proxy::http(proxy_str.clone()).expect("Failed to create HTTP proxy");
+                let https_proxy = Proxy::https_proxy(proxy_str).expect("Failed to create HTTPS proxy");
+                
+                client_builder = client_builder.proxy(http_proxy).proxy(https_proxy);
             }
         }
 

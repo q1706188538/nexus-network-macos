@@ -86,10 +86,18 @@ pub fn start_workers(
                     }
                     // Check if there are tasks to process
                     Some(task) = task_receiver.recv() => {
+                        let _ = prover_event_sender
+                            .send(Event::prover(
+                                worker_id,
+                                format!("[工作线程 #{}] 已收到任务 {}，即将开始计算...", worker_id, task.task_id),
+                                EventType::Refresh,
+                            ))
+                            .await;
+
                         match authenticated_proving(&task).await {
                             Ok(proof) => {
                                 let message = format!(
-                                    "\x1b[32m\t[任务进度 2/3] 证明计算成功\x1b[0m (任务ID: {})",
+                                    "\x1b[32m\t[任务进度 2/3] 任务 {} 计算完成\x1b[0m",
                                     task.task_id
                                 );
                                 let _ = prover_event_sender
