@@ -11,7 +11,10 @@ use crate::consts::prover::{
 };
 use crate::error_classifier::{ErrorClassifier, LogLevel};
 use crate::events::{Event, EventType};
-use crate::orchestrator::error::OrchestratorError;
+use crate::orchestrator::{
+    error::OrchestratorError, Orchestrator, FAILED_SUBMISSIONS, SUCCESSFUL_SUBMISSIONS,
+    TOTAL_TASKS_FETCHED, DUPLICATE_TASKS_FETCHED, UNIQUE_TASKS_FETCHED,
+};
 use crate::orchestrator::Orchestrator;
 use crate::task::Task;
 use crate::task_cache::TaskCache;
@@ -289,8 +292,12 @@ async fn process_fetched_tasks(
     for task in tasks {
         if recent_tasks.contains(&task.task_id).await {
             duplicate_count += 1;
+            DUPLICATE_TASKS_FETCHED.fetch_add(1, Ordering::SeqCst);
             continue;
         }
+        UNIQUE_TASKS_FETCHED.fetch_add(1, Ordering::SeqCst);
+
+        // If we've reached this point, the task is new.
         recent_tasks.insert(task.task_id.clone()).await;
 
         if sender.send(task.clone()).await.is_err() {
@@ -459,6 +466,7 @@ async fn fetch_new_tasks_batch(
             .await
         {
             Ok(task) => {
+                TOTAL_TASKS_FETCHED.fetch_add(1, Ordering::SeqCst);
                 new_tasks.push(task);
                 consecutive_404s = 0; // Reset counter on success
             }

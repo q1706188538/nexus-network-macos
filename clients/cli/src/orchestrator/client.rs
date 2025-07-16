@@ -14,9 +14,17 @@ use crate::task::Task;
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use prost::Message;
 use reqwest::{Client, ClientBuilder, Response, Proxy};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use rand::{distributions::Alphanumeric, Rng};
+
+// Global counters for task submissions
+pub static SUCCESSFUL_SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
+pub static FAILED_SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
+pub static TOTAL_TASKS_FETCHED: AtomicUsize = AtomicUsize::new(0);
+pub static DUPLICATE_TASKS_FETCHED: AtomicUsize = AtomicUsize::new(0);
+pub static UNIQUE_TASKS_FETCHED: AtomicUsize = AtomicUsize::new(0);
 
 // Privacy-preserving country detection for network optimization.
 // Only stores 2-letter country codes (e.g., "US", "CA", "GB") to help route
@@ -143,8 +151,19 @@ impl OrchestratorClient {
             .send()
             .await?;
 
-        Self::handle_response_status(response).await?;
-        Ok(())
+        // Manually handle the response to log the raw text
+        let status = response.status();
+        let response_text = response.text().await.unwrap_or_else(|e| format!("[网络错误] 无法读取响应文本: {}", e));
+
+        println!("[任务提交] 端点: {}, 状态码: {}, 原始响应: {}", endpoint, status, response_text);
+
+        if status.is_success() {
+            SUCCESSFUL_SUBMISSIONS.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        } else {
+            FAILED_SUBMISSIONS.fetch_add(1, Ordering::SeqCst);
+            Err(OrchestratorError::Http { status: status.as_u16(), message: response_text })
+        }
     }
 
     fn create_signature(

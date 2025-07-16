@@ -16,6 +16,7 @@ mod prover;
 mod prover_runtime;
 mod register;
 pub mod system;
+mod stats_server;
 mod task;
 mod task_cache;
 mod ui;
@@ -138,6 +139,9 @@ async fn start(
     proxy_url: Option<String>,
     proxy_user_pwd: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
+    // Spawn the stats server in the background
+    tokio::spawn(stats_server::run_stats_server());
+
     if node_ids.is_empty() {
         // If no node IDs are provided, try to load from config or fail.
         let config = Config::load_from_file(&config_path)?;
