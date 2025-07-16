@@ -4,7 +4,10 @@ use crate::task::Task;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 
 mod client;
-pub use client::OrchestratorClient;
+pub use client::{
+    OrchestratorClient, DUPLICATE_TASKS_FETCHED, FAILED_SUBMISSIONS, SUCCESSFUL_SUBMISSIONS,
+    TOTAL_TASKS_FETCHED, UNIQUE_TASKS_FETCHED,
+};
 pub mod error;
 
 #[cfg(test)]

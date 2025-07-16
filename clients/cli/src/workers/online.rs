@@ -15,7 +15,6 @@ use crate::orchestrator::{
     error::OrchestratorError, Orchestrator, FAILED_SUBMISSIONS, SUCCESSFUL_SUBMISSIONS,
     TOTAL_TASKS_FETCHED, DUPLICATE_TASKS_FETCHED, UNIQUE_TASKS_FETCHED,
 };
-use crate::orchestrator::Orchestrator;
 use crate::task::Task;
 use crate::task_cache::TaskCache;
 use ed25519_dalek::{SigningKey, VerifyingKey};

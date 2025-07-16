@@ -35,10 +35,15 @@ pub async fn run_stats_server() {
     let addr = SocketAddr::from(([127, 0, 0, 1], 38080));
     println!("[统计服务] 正在监听于 http://{}", addr);
 
-    if let Err(e) = axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-    {
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            eprintln!("[统计服务] 无法绑定到地址 {}: {}", addr, e);
+            return;
+        }
+    };
+
+    if let Err(e) = axum::serve(listener, app.into_make_service()).await {
         eprintln!("[统计服务] 服务器错误: {}", e);
     }
 } 
