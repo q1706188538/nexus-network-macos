@@ -38,6 +38,7 @@ pub async fn start_authenticated_workers(
     let (event_sender, event_receiver) = mpsc::channel::<Event>(EVENT_QUEUE_SIZE);
 
     // Start version checker
+    /*
     let version_checker_handle = {
         let current_version = env!("CARGO_PKG_VERSION").to_string();
         let event_sender = event_sender.clone();
@@ -47,6 +48,7 @@ pub async fn start_authenticated_workers(
         })
     };
     join_handles.push(version_checker_handle);
+    */
 
     // A bounded list of recently fetched task IDs (prevents refetching currently processing tasks)
     let enqueued_tasks = TaskCache::new(MAX_COMPLETED_TASKS);
@@ -109,8 +111,7 @@ pub async fn start_authenticated_workers(
         shutdown.resubscribe(),
         successful_tasks.clone(),
         completed_count,
-    )
-    .await;
+    );
     join_handles.push(submit_proofs_handle);
 
     (event_receiver, join_handles)
