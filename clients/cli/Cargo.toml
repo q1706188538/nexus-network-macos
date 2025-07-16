@@ -34,7 +34,6 @@ incremental = true
 
 [dependencies]
 # Nexus crates
-nexus-sdk = { git = "https://github.com/nexus-xyz/nexus-zkvm.git", branch = "main" }
 
 # CLI crates
 anyhow = "1.0.86"
