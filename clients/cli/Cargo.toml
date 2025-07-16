@@ -34,7 +34,7 @@ incremental = true
 
 [dependencies]
 # Nexus crates
-nexus-platform = { git = "https://github.com/nexus-xyz/nexus-zkvm.git", rev = "3134371" }
+nexus-platform = { git = "https://github.com/nexus-xyz/nexus-zkvm.git", branch = "main" }
 
 # CLI crates
 anyhow = "1.0.86"
