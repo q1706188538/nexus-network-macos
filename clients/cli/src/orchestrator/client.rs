@@ -53,6 +53,18 @@ impl OrchestratorClient {
     }
 
     fn generate_proxy_url(base_url: &str, user_pwd: &str) -> String {
+        if base_url.contains('@') {
+            // If the base_url contains a username, use it directly.
+            // Expected format: "username@hostname:port"
+            let parts: Vec<&str> = base_url.split('@').collect();
+            if parts.len() == 2 {
+                let user = parts[0];
+                let host_port = parts[1];
+                return format!("http://{}:{}@{}", user, user_pwd, host_port);
+            }
+        }
+
+        // Original logic for roxproxy
         let random_part: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(8)
