@@ -53,11 +53,17 @@ impl OrchestratorClient {
                 
                 println!("[代理配置] 正在配置代理: {}", proxy_str);
                 
-                // 为所有协议创建同一个代理
-                let proxy = Proxy::all(proxy_str).expect("Failed to create proxy");
+                // 根据代理类型配置不同的代理
+                let proxy = if proxy_str.starts_with("socks5://") {
+                    // SOCKS5代理
+                    Proxy::all(proxy_str).expect("Failed to create SOCKS5 proxy")
+                } else {
+                    // HTTP代理
+                    Proxy::all(proxy_str).expect("Failed to create HTTP proxy")
+                };
                 
                 client_builder = client_builder.proxy(proxy);
-                println!("[代理配置] 代理配置成功，所有HTTP/HTTPS请求将通过代理");
+                println!("[代理配置] 代理配置成功，所有HTTP/HTTPS/SOCKS5请求将通过代理");
             } else {
                 println!("[代理配置] 代理URL为空，将使用直连");
             }
@@ -74,6 +80,25 @@ impl OrchestratorClient {
     }
 
     pub fn generate_proxy_url(base_url: &str, user_pwd: &str) -> String {
+        // 检查是否是s5代理（SOCKS5）
+        if base_url.starts_with("s5://") || base_url.starts_with("socks5://") {
+            // SOCKS5代理格式
+            let clean_url = base_url.replace("s5://", "").replace("socks5://", "");
+            if clean_url.contains('@') {
+                // 如果包含用户名，直接使用
+                let parts: Vec<&str> = clean_url.split('@').collect();
+                if parts.len() == 2 {
+                    let user = parts[0];
+                    let host_port = parts[1];
+                    return format!("socks5://{}:{}@{}", user, user_pwd, host_port);
+                }
+            } else {
+                // 没有用户名，直接使用密码
+                return format!("socks5://{}:{}@{}", "user", user_pwd, clean_url);
+            }
+        }
+        
+        // HTTP代理处理
         if base_url.contains('@') {
             // If the base_url contains a username, use it directly.
             // Expected format: "username@hostname:port"

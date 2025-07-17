@@ -644,6 +644,9 @@ async fn process_proof_submission(
         .await;
 
     let mut retries = 0;
+    let max_retries = 3; // 增加重试次数到3次
+    let mut backoff_duration = Duration::from_secs(1); // 初始延迟1秒
+    
     loop {
         let current_orchestrator = orchestrator.recreate_with_new_proxy();
         match current_orchestrator
@@ -661,19 +664,35 @@ async fn process_proof_submission(
                 return None; // Success, don't break the loop
             }
             Err(e) => {
-                if retries < 1 {
+                // 检查是否是网络相关错误，这些错误值得重试
+                let should_retry = match &e {
+                    OrchestratorError::Http { status, .. } => {
+                        // 5xx服务器错误和429限流错误值得重试
+                        *status >= 500 || *status == 429
+                    }
+                    OrchestratorError::Network(_) => true, // 网络错误总是重试
+                    OrchestratorError::Timeout(_) => true, // 超时错误总是重试
+                    _ => false, // 其他错误（如认证错误、数据错误）不重试
+                };
+                
+                if should_retry && retries < max_retries {
                     retries += 1;
                     let _ = event_sender
                         .send(Event::prover_with_level(
                             0, // worker_id is not available here, using 0 as placeholder
                             format!(
-                                "任务 {} 证明提交失败，正在更换IP重试...",
-                                task.task_id
+                                "任务 {} 证明提交失败 (尝试 {}/{}): {}，{}秒后重试...",
+                                task.task_id, retries, max_retries, e, backoff_duration.as_secs()
                             ),
                             crate::events::EventType::Error,
                             LogLevel::Warn,
                         ))
                         .await;
+                    
+                    // 指数退避延迟
+                    tokio::time::sleep(backoff_duration).await;
+                    backoff_duration = Duration::from_secs(backoff_duration.as_secs() * 2); // 指数退避
+                    
                     continue; // continue to the next iteration to retry
                 } else {
                     handle_submission_error(&task, e, event_sender).await;

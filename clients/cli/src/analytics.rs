@@ -79,7 +79,16 @@ pub async fn track(
         if !url.is_empty() {
             let proxy_str = crate::orchestrator::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
             println!("[Analytics代理配置] 正在配置代理: {}", proxy_str);
-            let proxy = reqwest::Proxy::all(proxy_str).expect("Failed to create proxy for analytics");
+            
+            // 根据代理类型配置不同的代理
+            let proxy = if proxy_str.starts_with("socks5://") {
+                // SOCKS5代理
+                reqwest::Proxy::all(proxy_str).expect("Failed to create SOCKS5 proxy for analytics")
+            } else {
+                // HTTP代理
+                reqwest::Proxy::all(proxy_str).expect("Failed to create HTTP proxy for analytics")
+            };
+            
             client_builder = client_builder.proxy(proxy);
             println!("[Analytics代理配置] 代理配置成功");
         } else {
