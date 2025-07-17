@@ -670,7 +670,7 @@ async fn process_proof_submission(
                         // 5xx服务器错误和429限流错误值得重试
                         *status >= 500 || *status == 429
                     }
-                    OrchestratorError::Other(inner) => {
+                    OrchestratorError::Reqwest(inner) => {
                         let msg = format!("{}", inner);
                         msg.contains("timeout") || msg.contains("network") || msg.contains("timed out") || msg.contains("connection")
                     }
