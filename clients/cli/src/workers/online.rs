@@ -10,9 +10,9 @@ use crate::consts::prover::{
     TASK_QUEUE_SIZE,
 };
 use crate::error_classifier::{ErrorClassifier, LogLevel};
-use crate::events::{Event, EventType};
+use crate::events::Event;
 use crate::orchestrator::{
-    error::OrchestratorError, Orchestrator, FAILED_SUBMISSIONS, SUCCESSFUL_SUBMISSIONS,
+    error::OrchestratorError, Orchestrator,
     TOTAL_TASKS_FETCHED, DUPLICATE_TASKS_FETCHED, UNIQUE_TASKS_FETCHED,
 };
 use crate::task::Task;

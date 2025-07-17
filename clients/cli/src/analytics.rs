@@ -65,7 +65,7 @@ pub async fn track(
     proxy_url: &Option<String>,
     proxy_user_pwd: &Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let api_key = match environment {
+    let _api_key = match environment {
         Environment::Local => return Ok(()), // Do not send analytics in local
         Environment::Staging => return Ok(()), // Do not send analytics in staging
         Environment::Beta => "m99QWAbAh4S63u0I2wsY1y4G5zKz26Ab",
@@ -125,13 +125,7 @@ pub async fn track(
     // Add event properties to the properties JSON
     // This is done by iterating over the key-value pairs in the event_properties JSON object
     // but checking that it is a valid JSON object first
-    if let Some(obj) = properties.as_object() {
-        let mut properties_clone = properties.clone();
-        for (k, v) in obj {
-            properties_clone[k.clone()] = v.clone();
-        }
-        properties = properties_clone;
-    } else {
+    if !properties.is_object() {
         return Err(Box::new(TrackError::InvalidEventProperties));
     }
 

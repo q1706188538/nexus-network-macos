@@ -26,7 +26,7 @@ mod workers;
 use crate::config::{Config, get_config_path};
 use crate::environment::Environment;
 use crate::orchestrator::{Orchestrator, OrchestratorClient};
-use crate::prover_runtime::{start_anonymous_workers, start_authenticated_workers};
+use crate::prover_runtime::start_authenticated_workers;
 use crate::register::{register_node, register_user};
 use clap::{ArgAction, Parser, Subcommand};
 use crossterm::{
