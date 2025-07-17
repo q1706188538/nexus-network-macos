@@ -670,8 +670,10 @@ async fn process_proof_submission(
                         // 5xx服务器错误和429限流错误值得重试
                         *status >= 500 || *status == 429
                     }
-                    OrchestratorError::Network(_) => true, // 网络错误总是重试
-                    OrchestratorError::Timeout(_) => true, // 超时错误总是重试
+                    OrchestratorError::Other(inner) => {
+                        let msg = format!("{}", inner);
+                        msg.contains("timeout") || msg.contains("network") || msg.contains("timed out") || msg.contains("connection")
+                    }
                     _ => false, // 其他错误（如认证错误、数据错误）不重试
                 };
                 
