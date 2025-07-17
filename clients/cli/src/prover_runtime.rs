@@ -90,8 +90,8 @@ pub async fn start_authenticated_workers(
         shutdown.resubscribe(),
         environment.clone(),
         client_id.clone(),
-        orchestrator.proxy_url().cloned(),
-        orchestrator.proxy_user_pwd().cloned(),
+        orchestrator.proxy_url_cloned(),
+        orchestrator.proxy_user_pwd_cloned(),
     );
     join_handles.extend(worker_handles);
 

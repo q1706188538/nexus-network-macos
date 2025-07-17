@@ -127,7 +127,7 @@ pub async fn track(
     // but checking that it is a valid JSON object first
     if let Some(obj) = properties.as_object() {
         for (k, v) in obj {
-            properties[k] = v.clone();
+            properties[k.clone()] = v.clone();
         }
     } else {
         return Err(Box::new(TrackError::InvalidEventProperties));

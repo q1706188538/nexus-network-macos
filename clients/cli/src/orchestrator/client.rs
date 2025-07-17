@@ -371,6 +371,14 @@ impl Orchestrator for OrchestratorClient {
         self.proxy_user_pwd.as_ref()
     }
 
+    pub fn proxy_url_cloned(&self) -> Option<String> {
+        self.proxy_url.clone()
+    }
+
+    pub fn proxy_user_pwd_cloned(&self) -> Option<String> {
+        self.proxy_user_pwd.clone()
+    }
+
     fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator> {
         Box::new(OrchestratorClient::new(
             self.environment.clone(),
