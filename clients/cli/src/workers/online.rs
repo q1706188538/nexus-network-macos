@@ -644,28 +644,44 @@ async fn process_proof_submission(
         .await;
 
     let mut retries = 0;
-    // let max_retries = 3; // 移除重试次数
-    // let mut backoff_duration = Duration::from_secs(1); // 移除延迟
+    let max_retries = 1; // 只重试1次
     
-    // 只提交一次，不重试
-    let current_orchestrator = orchestrator.recreate_with_new_proxy();
-    match current_orchestrator
-        .submit_proof(
-            &task.task_id,
-            &proof_hash,
-            proof_bytes.clone(),
-            signing_key.clone(),
-            num_workers,
-        )
-        .await
-    {
-        Ok(()) => {
-            handle_submission_success(&task, event_sender, successful_tasks).await;
-            return None; // Success
-        }
-        Err(e) => {
-            handle_submission_error(&task, e, event_sender).await;
-            return Some(true); // 失败
+    loop {
+        let current_orchestrator = orchestrator.recreate_with_new_proxy();
+        match current_orchestrator
+            .submit_proof(
+                &task.task_id,
+                &proof_hash,
+                proof_bytes.clone(),
+                signing_key.clone(),
+                num_workers,
+            )
+            .await
+        {
+            Ok(()) => {
+                handle_submission_success(&task, event_sender, successful_tasks).await;
+                return None; // Success
+            }
+            Err(e) => {
+                if retries < max_retries {
+                    retries += 1;
+                    let _ = event_sender
+                        .send(Event::prover_with_level(
+                            0, // worker_id is not available here, using 0 as placeholder
+                            format!(
+                                "任务 {} 证明提交失败，正在更换IP重试...",
+                                task.task_id
+                            ),
+                            crate::events::EventType::Error,
+                            LogLevel::Warn,
+                        ))
+                        .await;
+                    continue; // 立即重试
+                } else {
+                    handle_submission_error(&task, e, event_sender).await;
+                    return Some(true); // 失败
+                }
+            }
         }
     }
 }
