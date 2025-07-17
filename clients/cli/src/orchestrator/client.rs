@@ -66,7 +66,7 @@ impl OrchestratorClient {
         }
     }
 
-    fn generate_proxy_url(base_url: &str, user_pwd: &str) -> String {
+    pub fn generate_proxy_url(base_url: &str, user_pwd: &str) -> String {
         if base_url.contains('@') {
             // If the base_url contains a username, use it directly.
             // Expected format: "username@hostname:port"

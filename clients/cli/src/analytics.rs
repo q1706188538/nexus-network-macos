@@ -66,10 +66,9 @@ pub async fn track(
     proxy_user_pwd: &Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let api_key = match environment {
-        Environment::Dev => return Ok(()), // Do not send analytics in dev
+        Environment::Local => return Ok(()), // Do not send analytics in local
         Environment::Staging => return Ok(()), // Do not send analytics in staging
         Environment::Beta => "m99QWAbAh4S63u0I2wsY1y4G5zKz26Ab",
-        Environment::Prod => "m99QWAbAh4S63u0I2wsY1y4G5zKz26Ab",
     };
 
     let mut client_builder = reqwest::ClientBuilder::new()
