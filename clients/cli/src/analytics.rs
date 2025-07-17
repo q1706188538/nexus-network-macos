@@ -78,9 +78,15 @@ pub async fn track(
     if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
         if !url.is_empty() {
             let proxy_str = crate::orchestrator::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
+            println!("[Analytics代理配置] 正在配置代理: {}", proxy_str);
             let proxy = reqwest::Proxy::all(proxy_str).expect("Failed to create proxy for analytics");
             client_builder = client_builder.proxy(proxy);
+            println!("[Analytics代理配置] 代理配置成功");
+        } else {
+            println!("[Analytics代理配置] 代理URL为空，将使用直连");
         }
+    } else {
+        println!("[Analytics代理配置] 未提供代理配置，将使用直连");
     }
 
     let client = client_builder.build()?;

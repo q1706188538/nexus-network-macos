@@ -51,11 +51,18 @@ impl OrchestratorClient {
             if !url.is_empty() {
                 let proxy_str = Self::generate_proxy_url(&url, &user_pwd);
                 
+                println!("[代理配置] 正在配置代理: {}", proxy_str);
+                
                 // 为所有协议创建同一个代理
                 let proxy = Proxy::all(proxy_str).expect("Failed to create proxy");
                 
                 client_builder = client_builder.proxy(proxy);
+                println!("[代理配置] 代理配置成功，所有HTTP/HTTPS请求将通过代理");
+            } else {
+                println!("[代理配置] 代理URL为空，将使用直连");
             }
+        } else {
+            println!("[代理配置] 未提供代理配置，将使用直连");
         }
 
         Self {
@@ -125,6 +132,7 @@ impl OrchestratorClient {
         endpoint: &str,
     ) -> Result<T, OrchestratorError> {
         let url = self.build_url(endpoint);
+        println!("[网络请求] GET {} (通过代理: {})", url, self.proxy_url.as_ref().unwrap_or(&"无".to_string()));
         let response = self.client.get(&url).send().await?;
 
         let response = Self::handle_response_status(response).await?;
@@ -138,6 +146,7 @@ impl OrchestratorClient {
         body: Vec<u8>,
     ) -> Result<T, OrchestratorError> {
         let url = self.build_url(endpoint);
+        println!("[网络请求] POST {} (通过代理: {})", url, self.proxy_url.as_ref().unwrap_or(&"无".to_string()));
         let response = self
             .client
             .post(&url)
@@ -157,6 +166,7 @@ impl OrchestratorClient {
         body: Vec<u8>,
     ) -> Result<(), OrchestratorError> {
         let url = self.build_url(endpoint);
+        println!("[网络请求] POST {} (通过代理: {})", url, self.proxy_url.as_ref().unwrap_or(&"无".to_string()));
         let response = self
             .client
             .post(&url)
