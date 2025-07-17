@@ -371,11 +371,11 @@ impl Orchestrator for OrchestratorClient {
             .await
     }
 
-    pub fn proxy_url(&self) -> Option<&String> {
+    fn proxy_url(&self) -> Option<&String> {
         self.proxy_url.as_ref()
     }
 
-    pub fn proxy_user_pwd(&self) -> Option<&String> {
+    fn proxy_user_pwd(&self) -> Option<&String> {
         self.proxy_user_pwd.as_ref()
     }
 

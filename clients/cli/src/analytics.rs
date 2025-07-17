@@ -9,7 +9,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use std::time::Duration;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+
 
 #[derive(Debug, thiserror::Error)]
 pub enum TrackError {
@@ -77,7 +77,7 @@ pub async fn track(
 
     if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
         if !url.is_empty() {
-            let proxy_str = crate::orchestrator::client::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
+            let proxy_str = crate::orchestrator::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
             let proxy = reqwest::Proxy::all(proxy_str).expect("Failed to create proxy for analytics");
             client_builder = client_builder.proxy(proxy);
         }
