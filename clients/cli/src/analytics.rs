@@ -79,9 +79,8 @@ pub async fn track(
     if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
         if !url.is_empty() {
             let proxy_str = crate::orchestrator::client::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
-            let http_proxy = reqwest::Proxy::http(proxy_str.clone()).expect("Failed to create HTTP proxy for analytics");
-            let https_proxy = reqwest::Proxy::https(proxy_str).expect("Failed to create HTTPS proxy for analytics");
-            client_builder = client_builder.proxy(http_proxy).proxy(https_proxy);
+            let proxy = reqwest::Proxy::all(proxy_str).expect("Failed to create proxy for analytics");
+            client_builder = client_builder.proxy(proxy);
         }
     }
 
@@ -132,7 +131,7 @@ pub async fn track(
             properties[k] = v.clone();
         }
     } else {
-        return Err(TrackError::InvalidEventProperties);
+        return Err(Box::new(TrackError::InvalidEventProperties));
     }
 
     // Format for events
@@ -159,10 +158,10 @@ pub async fn track(
     let status = response.status();
     if !status.is_success() {
         let body_text = response.text().await?;
-        return Err(TrackError::FailedResponse {
+        return Err(Box::new(TrackError::FailedResponse {
             status,
             body: body_text,
-        });
+        }));
     }
 
     Ok(())
