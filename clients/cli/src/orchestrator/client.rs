@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use rand::{distributions::Alphanumeric, Rng};
-use tracing::{debug, error, info, warn};
+use tracing::trace;
 
 // Global counters for task submissions
 pub static SUCCESSFUL_SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
@@ -371,13 +371,7 @@ impl Orchestrator for OrchestratorClient {
             .await
     }
 
-    fn proxy_url(&self) -> Option<&String> {
-        self.proxy_url.as_ref()
-    }
 
-    fn proxy_user_pwd(&self) -> Option<&String> {
-        self.proxy_user_pwd.as_ref()
-    }
 
     fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator> {
         Box::new(OrchestratorClient::new(

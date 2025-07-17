@@ -59,7 +59,7 @@ pub fn analytics_api_key(environment: &Environment) -> String {
 /// * `client_id` - A unique identifier for the client, typically a UUID or similar.
 pub async fn track(
     event_name: String,
-    properties: Value,
+    _properties: Value,
     environment: &Environment,
     client_id: String,
     proxy_url: &Option<String>,
@@ -107,7 +107,7 @@ pub async fn track(
         |tz| tz,
     );
 
-    let mut properties = json!({
+    let properties = json!({
         "time": system_time,
         "platform": "CLI",
         "os": env::consts::OS,
