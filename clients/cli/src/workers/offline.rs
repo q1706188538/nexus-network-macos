@@ -62,6 +62,8 @@ pub fn start_workers(
     shutdown: broadcast::Receiver<()>,
     environment: Environment,
     client_id: String,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
 ) -> (Vec<mpsc::Sender<Task>>, Vec<JoinHandle<()>>) {
     let mut senders = Vec::with_capacity(num_workers);
     let mut handles = Vec::with_capacity(num_workers);
@@ -73,6 +75,8 @@ pub fn start_workers(
         let results_sender = results_sender.clone();
         let mut shutdown_rx = shutdown.resubscribe();
         let client_id = client_id.clone();
+        let proxy_url_clone = proxy_url.clone();
+        let proxy_user_pwd_clone = proxy_user_pwd.clone();
         let error_classifier = ErrorClassifier::new();
         let handle = tokio::spawn(async move {
             loop {
@@ -105,7 +109,7 @@ pub fn start_workers(
                                     .await;
 
                                 // Track analytics for successful proof (non-blocking)
-                                track_authenticated_proof_analytics(&task, &environment, client_id.clone()).await;
+                                track_authenticated_proof_analytics(&task, &environment, client_id.clone(), &proxy_url_clone, &proxy_user_pwd_clone).await;
 
                                 let _ = results_sender.send((task, proof)).await;
                             }
@@ -140,6 +144,8 @@ pub async fn start_anonymous_workers(
     shutdown: broadcast::Receiver<()>,
     environment: Environment,
     client_id: String,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
 ) -> (mpsc::Receiver<Event>, Vec<JoinHandle<()>>) {
     let (event_sender, event_receiver) = mpsc::channel::<Event>(100);
     let mut join_handles = Vec::new();
@@ -147,6 +153,8 @@ pub async fn start_anonymous_workers(
         let prover_event_sender = event_sender.clone();
         let mut shutdown_rx = shutdown.resubscribe(); // clone receiver for each worker
         let client_id = client_id.clone();
+        let proxy_url_clone = proxy_url.clone();
+        let proxy_user_pwd_clone = proxy_user_pwd.clone();
         let error_classifier = ErrorClassifier::new();
 
         let handle = tokio::spawn(async move {
@@ -169,7 +177,7 @@ pub async fn start_anonymous_workers(
                                     .send(Event::prover(worker_id, message, EventType::Success)).await;
 
                                 // Track analytics for successful anonymous proof (non-blocking)
-                                track_anonymous_proof_analytics(&environment, client_id.clone()).await;
+                                track_anonymous_proof_analytics(&environment, client_id.clone(), &proxy_url_clone, &proxy_user_pwd_clone).await;
                             }
                             Err(e) => {
                                 let log_level = error_classifier.classify_worker_error(&e);
@@ -198,6 +206,8 @@ async fn track_authenticated_proof_analytics(
     task: &Task,
     environment: &Environment,
     client_id: String,
+    proxy_url: &Option<String>,
+    proxy_user_pwd: &Option<String>,
 ) {
     let analytics_data = match task.program_id.as_str() {
         "fast-fib" => {
@@ -248,13 +258,15 @@ async fn track_authenticated_proof_analytics(
         analytics_data,
         environment,
         client_id,
+        proxy_url,
+        proxy_user_pwd,
     )
     .await;
     // TODO: Catch errors and log them
 }
 
 /// Track analytics for anonymous proof (non-blocking)
-async fn track_anonymous_proof_analytics(environment: &Environment, client_id: String) {
+async fn track_anonymous_proof_analytics(environment: &Environment, client_id: String, proxy_url: &Option<String>, proxy_user_pwd: &Option<String>) {
     // Anonymous proofs use hardcoded input: (n=9, init_a=1, init_b=1)
     let public_input = (9, 1, 1);
 
@@ -268,6 +280,8 @@ async fn track_anonymous_proof_analytics(environment: &Environment, client_id: S
         }),
         environment,
         client_id,
+        proxy_url,
+        proxy_user_pwd,
     )
     .await;
     // TODO: Catch errors and log them

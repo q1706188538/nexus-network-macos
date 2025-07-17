@@ -51,11 +51,10 @@ impl OrchestratorClient {
             if !url.is_empty() {
                 let proxy_str = Self::generate_proxy_url(&url, &user_pwd);
                 
-                // 为 HTTP 和 HTTPS 创建代理
-                let http_proxy = Proxy::http(proxy_str.clone()).expect("Failed to create HTTP proxy");
-                let https_proxy = Proxy::https(proxy_str).expect("Failed to create HTTPS proxy");
+                // 为所有协议创建同一个代理
+                let proxy = Proxy::all(proxy_str).expect("Failed to create proxy");
                 
-                client_builder = client_builder.proxy(http_proxy).proxy(https_proxy);
+                client_builder = client_builder.proxy(proxy);
             }
         }
 
@@ -362,6 +361,14 @@ impl Orchestrator for OrchestratorClient {
 
         self.post_request_no_response("v3/tasks/submit", request_bytes)
             .await
+    }
+
+    pub fn proxy_url(&self) -> Option<&String> {
+        self.proxy_url.as_ref()
+    }
+
+    pub fn proxy_user_pwd(&self) -> Option<&String> {
+        self.proxy_user_pwd.as_ref()
     }
 
     fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator> {

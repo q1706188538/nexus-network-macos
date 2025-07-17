@@ -8,6 +8,8 @@ use std::{
     env,
     time::{SystemTime, UNIX_EPOCH},
 };
+use std::time::Duration;
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TrackError {
@@ -57,10 +59,34 @@ pub fn analytics_api_key(environment: &Environment) -> String {
 /// * `client_id` - A unique identifier for the client, typically a UUID or similar.
 pub async fn track(
     event_name: String,
-    event_properties: Value,
+    properties: Value,
     environment: &Environment,
     client_id: String,
-) -> Result<(), TrackError> {
+    proxy_url: &Option<String>,
+    proxy_user_pwd: &Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let api_key = match environment {
+        Environment::Dev => return Ok(()), // Do not send analytics in dev
+        Environment::Staging => return Ok(()), // Do not send analytics in staging
+        Environment::Beta => "m99QWAbAh4S63u0I2wsY1y4G5zKz26Ab",
+        Environment::Prod => "m99QWAbAh4S63u0I2wsY1y4G5zKz26Ab",
+    };
+
+    let mut client_builder = reqwest::ClientBuilder::new()
+        .timeout(Duration::from_secs(10))
+        .no_proxy();
+
+    if let (Some(url), Some(user_pwd)) = (proxy_url.clone(), proxy_user_pwd.clone()) {
+        if !url.is_empty() {
+            let proxy_str = crate::orchestrator::client::OrchestratorClient::generate_proxy_url(&url, &user_pwd);
+            let http_proxy = reqwest::Proxy::http(proxy_str.clone()).expect("Failed to create HTTP proxy for analytics");
+            let https_proxy = reqwest::Proxy::https(proxy_str).expect("Failed to create HTTPS proxy for analytics");
+            client_builder = client_builder.proxy(http_proxy).proxy(https_proxy);
+        }
+    }
+
+    let client = client_builder.build()?;
+
     let analytics_id = analytics_id(environment);
     let analytics_api_key = analytics_api_key(environment);
     if analytics_id.is_empty() {
@@ -101,7 +127,7 @@ pub async fn track(
     // Add event properties to the properties JSON
     // This is done by iterating over the key-value pairs in the event_properties JSON object
     // but checking that it is a valid JSON object first
-    if let Some(obj) = event_properties.as_object() {
+    if let Some(obj) = properties.as_object() {
         for (k, v) in obj {
             properties[k] = v.clone();
         }
@@ -118,7 +144,6 @@ pub async fn track(
         }],
     });
 
-    let client = reqwest::Client::new();
     let url = format!(
         "https://www.google-analytics.com/mp/collect?measurement_id={}&api_secret={}",
         analytics_id, analytics_api_key

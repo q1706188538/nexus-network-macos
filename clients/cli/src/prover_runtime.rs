@@ -88,8 +88,10 @@ pub async fn start_authenticated_workers(
         result_sender,
         event_sender.clone(),
         shutdown.resubscribe(),
-        environment,
-        client_id,
+        environment.clone(),
+        client_id.clone(),
+        orchestrator.proxy_url().cloned(),
+        orchestrator.proxy_user_pwd().cloned(),
     );
     join_handles.extend(worker_handles);
 
@@ -111,7 +113,8 @@ pub async fn start_authenticated_workers(
         shutdown.resubscribe(),
         successful_tasks.clone(),
         completed_count,
-    );
+    )
+    .await;
     join_handles.push(submit_proofs_handle);
 
     (event_receiver, join_handles)
@@ -123,6 +126,8 @@ pub async fn start_anonymous_workers(
     shutdown: broadcast::Receiver<()>,
     environment: Environment,
     client_id: String,
+    proxy_url: Option<String>,
+    proxy_user_pwd: Option<String>,
 ) -> (mpsc::Receiver<Event>, Vec<JoinHandle<()>>) {
     let mut join_handles = Vec::new();
     // Worker events
@@ -141,7 +146,7 @@ pub async fn start_anonymous_workers(
 
     // Start anonymous workers
     let (anonymous_event_receiver, anonymous_handles) =
-        offline::start_anonymous_workers(num_workers, shutdown, environment, client_id).await;
+        offline::start_anonymous_workers(num_workers, shutdown, environment, client_id, proxy_url, proxy_user_pwd).await;
     join_handles.extend(anonymous_handles);
 
     // Forward events from anonymous workers to our event sender
