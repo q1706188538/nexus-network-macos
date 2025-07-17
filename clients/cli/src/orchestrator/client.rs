@@ -89,6 +89,14 @@ impl OrchestratorClient {
         format!("http://{}:{}@{}", proxy_user, user_pwd, base_url)
     }
 
+    pub fn proxy_url_cloned(&self) -> Option<String> {
+        self.proxy_url.clone()
+    }
+
+    pub fn proxy_user_pwd_cloned(&self) -> Option<String> {
+        self.proxy_user_pwd.clone()
+    }
+
     fn build_url(&self, endpoint: &str) -> String {
         format!(
             "{}/{}",
@@ -369,14 +377,6 @@ impl Orchestrator for OrchestratorClient {
 
     pub fn proxy_user_pwd(&self) -> Option<&String> {
         self.proxy_user_pwd.as_ref()
-    }
-
-    pub fn proxy_url_cloned(&self) -> Option<String> {
-        self.proxy_url.clone()
-    }
-
-    pub fn proxy_user_pwd_cloned(&self) -> Option<String> {
-        self.proxy_user_pwd.clone()
     }
 
     fn recreate_with_new_proxy(&self) -> Box<dyn Orchestrator> {

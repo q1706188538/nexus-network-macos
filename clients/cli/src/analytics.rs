@@ -126,9 +126,11 @@ pub async fn track(
     // This is done by iterating over the key-value pairs in the event_properties JSON object
     // but checking that it is a valid JSON object first
     if let Some(obj) = properties.as_object() {
+        let mut properties_clone = properties.clone();
         for (k, v) in obj {
-            properties[k.clone()] = v.clone();
+            properties_clone[k.clone()] = v.clone();
         }
+        properties = properties_clone;
     } else {
         return Err(Box::new(TrackError::InvalidEventProperties));
     }
