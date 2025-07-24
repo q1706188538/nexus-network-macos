@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use rand::{distributions::Alphanumeric, Rng};
-use tracing::trace;
+// use tracing::trace; // 已删除未使用
 
 // Global counters for task submissions
 pub static SUCCESSFUL_SUBMISSIONS: AtomicUsize = AtomicUsize::new(0);
@@ -211,7 +211,7 @@ impl OrchestratorClient {
             Ok(())
         } else {
             FAILED_SUBMISSIONS.fetch_add(1, Ordering::SeqCst);
-            Err(OrchestratorError::Http { status: status.as_u16(), message: response_text })
+            Err(OrchestratorError::Http { status: status.as_u16(), message: response_text, headers: std::collections::HashMap::new() })
         }
     }
 
