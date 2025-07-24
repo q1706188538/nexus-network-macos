@@ -3,6 +3,7 @@
 use prost::DecodeError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use std::collections::HashMap;
 
 #[allow(non_snake_case)] // used for json parsing
 #[derive(Serialize, Deserialize)]
@@ -24,7 +25,7 @@ pub enum OrchestratorError {
 
     /// An error occurred while processing the request.
     #[error("HTTP error with status {status}: {message}")]
-    Http { status: u16, message: String },
+    Http { status: u16, message: String, headers: HashMap<String, String> },
 
     /// Rate limited by the server (429)
     #[error("Rate limited: retry after {retry_after} seconds")]
@@ -43,12 +44,19 @@ impl OrchestratorError {
                 .unwrap_or(0);
             return OrchestratorError::RateLimited { retry_after };
         }
+        // 收集所有header
+        let mut headers = HashMap::new();
+        for (name, value) in response.headers().iter() {
+            if let Ok(value_str) = value.to_str() {
+                headers.insert(name.to_string().to_lowercase(), value_str.to_string());
+            }
+        }
         let message = response
             .text()
             .await
             .unwrap_or_else(|_| "Failed to read response text".to_string());
 
-        OrchestratorError::Http { status, message }
+        OrchestratorError::Http { status, message, headers }
     }
 
     pub fn to_pretty(&self) -> Option<String> {
@@ -65,6 +73,15 @@ impl OrchestratorError {
 
                 None
             }
+            _ => None,
+        }
+    }
+
+    pub fn get_retry_after_seconds(&self) -> Option<u64> {
+        match self {
+            OrchestratorError::RateLimited { retry_after } => Some(*retry_after),
+            OrchestratorError::Http { headers, .. } => headers.get("retry-after")
+                .and_then(|v| v.parse::<u64>().ok()),
             _ => None,
         }
     }

@@ -682,7 +682,7 @@ async fn process_proof_submission(
         ))
         .await;
 
-    // 只提交一次，不重试，但遇到RateLimited时严格等待后再请求一次
+    // 只提交一次，不重试，遇到429统一严格等待后再请求一次
     let current_orchestrator = orchestrator.recreate_with_new_proxy();
     match current_orchestrator
         .submit_proof(
@@ -698,12 +698,12 @@ async fn process_proof_submission(
             handle_submission_success(&task, event_sender, successful_tasks).await;
             return None; // Success
         }
-        Err(OrchestratorError::RateLimited { retry_after }) => {
-            let wait_secs = retry_after + 1;
+        Err(ref e) if e.get_retry_after_seconds().is_some() => {
+            let wait_secs = e.get_retry_after_seconds().unwrap() + 1;
             let _ = event_sender
                 .send(Event::prover_with_level(
                     0,
-                    format!("任务 {} 提交被限流，等待 {} 秒后重试...", task.task_id, wait_secs),
+                    format!("任务 {} 提交被限流(429)，等待 {} 秒后重试...", task.task_id, wait_secs),
                     crate::events::EventType::Error,
                     LogLevel::Warn,
                 ))
