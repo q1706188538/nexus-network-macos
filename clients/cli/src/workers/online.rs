@@ -378,25 +378,51 @@ async fn handle_fetch_error(
     state: &mut TaskFetchState,
     _completed_count: &Arc<AtomicU64>,
 ) {
-    let log_level = state.error_classifier.classify_fetch_error(&error);
-    let msg = format!("\t\t获取任务失败: {}", error);
-    let _ = event_sender
-        .send(Event::task_fetcher_with_level(
-            msg,
-            crate::events::EventType::Error,
-            log_level,
-        ))
-        .await;
-
-    // Apply backoff based on error type
-    if let OrchestratorError::Http { status, .. } = error {
-        if status == 429 {
+    match error {
+        OrchestratorError::RateLimited { retry_after } => {
             state.increase_backoff_for_rate_limit();
-        } else if status >= 500 && status < 600 || status >= 400 && status < 500 {
-            state.increase_backoff_for_error();
+            let _ = event_sender
+                .send(Event::task_fetcher_with_level(
+                    format!(
+                        "Rate limited - retry after {} seconds, backing off for {}s",
+                        retry_after,
+                        state.backoff_duration.as_secs()
+                    ),
+                    crate::events::EventType::Error,
+                    LogLevel::Warn,
+                ))
+                .await;
         }
-    } else {
-        state.increase_backoff_for_error();
+        OrchestratorError::Http { status: 429, .. } => {
+            // 兼容旧逻辑，理论上不会再走到这里
+            state.increase_backoff_for_rate_limit();
+            let _ = event_sender
+                .send(Event::task_fetcher_with_level(
+                    format!(
+                        "Rate limited - retrying in {}s",
+                        state.backoff_duration.as_secs()
+                    ),
+                    crate::events::EventType::Error,
+                    LogLevel::Warn,
+                ))
+                .await;
+        }
+        _ => {
+            state.increase_backoff_for_error();
+            let log_level = state.error_classifier.classify_fetch_error(&error);
+            let event = Event::task_fetcher_with_level(
+                format!(
+                    "Failed to fetch tasks: {}, retrying in {} seconds",
+                    error,
+                    state.backoff_duration.as_secs()
+                ),
+                crate::events::EventType::Error,
+                log_level,
+            );
+            if event.should_display() {
+                let _ = event_sender.send(event).await;
+            }
+        }
     }
 }
 
@@ -469,7 +495,21 @@ async fn fetch_new_tasks_batch(
                 new_tasks.push(task);
                 consecutive_404s = 0; // Reset counter on success
             }
+            Err(OrchestratorError::RateLimited { retry_after }) => {
+                let _ = event_sender
+                    .send(Event::task_fetcher_with_level(
+                        format!("\t\tRate limited: retry after {} seconds", retry_after),
+                        crate::events::EventType::Refresh,
+                        LogLevel::Debug,
+                    ))
+                    .await;
+                if retry_after > 0 {
+                    tokio::time::sleep(std::time::Duration::from_secs(retry_after)).await;
+                }
+                break;
+            }
             Err(OrchestratorError::Http { status: 429, .. }) => {
+                // 兼容旧逻辑，理论上不会再走到这里
                 let _ = event_sender
                     .send(Event::task_fetcher_with_level(
                         "\t\tEvery node in the Prover Network is rate limited to 3 tasks per 3 minutes".to_string(),
@@ -477,7 +517,6 @@ async fn fetch_new_tasks_batch(
                         LogLevel::Debug,
                     ))
                     .await;
-                // Rate limited, return what we have
                 break;
             }
             Err(OrchestratorError::Http { status: 404, .. }) => {
@@ -643,45 +682,58 @@ async fn process_proof_submission(
         ))
         .await;
 
-    let mut retries = 0;
-    let max_retries = 1; // 只重试1次
-    
-    loop {
-        let current_orchestrator = orchestrator.recreate_with_new_proxy();
-        match current_orchestrator
-            .submit_proof(
-                &task.task_id,
-                &proof_hash,
-                proof_bytes.clone(),
-                signing_key.clone(),
-                num_workers,
-            )
-            .await
-        {
-            Ok(()) => {
-                handle_submission_success(&task, event_sender, successful_tasks).await;
-                return None; // Success
-            }
-            Err(e) => {
-                if retries < max_retries {
-                    retries += 1;
-                    let _ = event_sender
-                        .send(Event::prover_with_level(
-                            0, // worker_id is not available here, using 0 as placeholder
-                            format!(
-                                "任务 {} 证明提交失败，正在更换IP重试...",
-                                task.task_id
-                            ),
-                            crate::events::EventType::Error,
-                            LogLevel::Warn,
-                        ))
-                        .await;
-                    continue; // 立即重试
-                } else {
+    // 只提交一次，不重试，但遇到RateLimited时严格等待后再请求一次
+    let current_orchestrator = orchestrator.recreate_with_new_proxy();
+    match current_orchestrator
+        .submit_proof(
+            &task.task_id,
+            &proof_hash,
+            proof_bytes.clone(),
+            signing_key.clone(),
+            num_workers,
+        )
+        .await
+    {
+        Ok(()) => {
+            handle_submission_success(&task, event_sender, successful_tasks).await;
+            return None; // Success
+        }
+        Err(OrchestratorError::RateLimited { retry_after }) => {
+            let wait_secs = retry_after + 1;
+            let _ = event_sender
+                .send(Event::prover_with_level(
+                    0,
+                    format!("任务 {} 提交被限流，等待 {} 秒后重试...", task.task_id, wait_secs),
+                    crate::events::EventType::Error,
+                    LogLevel::Warn,
+                ))
+                .await;
+            tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
+            // 再请求一次
+            let retry_orchestrator = orchestrator.recreate_with_new_proxy();
+            match retry_orchestrator
+                .submit_proof(
+                    &task.task_id,
+                    &proof_hash,
+                    proof_bytes.clone(),
+                    signing_key.clone(),
+                    num_workers,
+                )
+                .await
+            {
+                Ok(()) => {
+                    handle_submission_success(&task, event_sender, successful_tasks).await;
+                    return None;
+                }
+                Err(e) => {
                     handle_submission_error(&task, e, event_sender).await;
-                    return Some(true); // 失败
+                    return Some(true);
                 }
             }
+        }
+        Err(e) => {
+            handle_submission_error(&task, e, event_sender).await;
+            return Some(true); // 失败
         }
     }
 }
